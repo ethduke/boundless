@@ -98,15 +98,19 @@ where
             });
         }
         UnifiedPriorityMode::LockAndFulfillFirst => {
-            let (mut lock_and_fulfill_orders, mut other_orders): (Vec<T>, Vec<T>) = orders
+            // Convert to Vec for partitioning
+            let mut orders_vec: Vec<T> = orders.to_vec();
+            let (mut lock_and_fulfill_orders, mut other_orders): (Vec<T>, Vec<T>) = orders_vec
                 .drain(..)
                 .partition(|order| order.as_ref().fulfillment_type == FulfillmentType::LockAndFulfill);
 
             sort_by_mode(&mut lock_and_fulfill_orders, UnifiedPriorityMode::ShortestExpiry);
             sort_by_mode(&mut other_orders, UnifiedPriorityMode::ShortestExpiry);
 
-            orders.extend(lock_and_fulfill_orders);
-            orders.extend(other_orders);
+            // Clear and rebuild the original slice
+            orders.clear();
+            orders.extend_from_slice(&lock_and_fulfill_orders);
+            orders.extend_from_slice(&other_orders);
         }
     }
 }

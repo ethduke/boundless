@@ -105,6 +105,8 @@ impl Default for OrderPricingPriority {
 pub enum OrderCommitmentPriority {
     /// Process orders in random order to distribute competition among provers
     Random,
+    /// Process orders in the order they were observed (FIFO)
+    ObservationTime,
     /// Process orders by shortest expiry first (lock expiry for lock-and-fulfill orders, request expiry for others)
     ShortestExpiry,
     /// OPTIMIZATION: Process LockAndFulfill orders first for ultra-fast locking
