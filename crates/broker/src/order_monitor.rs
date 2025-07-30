@@ -898,7 +898,10 @@ where
                 // Process new orders from the channel as soon as they arrive
                 biased;
 
-                Some(result) = self.priced_order_rx.lock().await.recv() => {
+                Some(result) = {
+                    let mut rx = self.priced_order_rx.lock().await;
+                    rx.recv()
+                } => {
                     self.handle_new_order_result(result).await?;
                 }
 
