@@ -266,7 +266,7 @@ where
             tracing::debug!(
                 "Order value: {}, using priority fee: {} gwei ({}x multiplier)",
                 format_ether(order_value),
-                dynamic_priority / U256::from(1_000_000_000),
+                (dynamic_priority / U256::from(1_000_000_000)).try_into().unwrap_or(0),
                 value_multiplier
             );
             
@@ -281,7 +281,7 @@ where
         );
         let lock_block = self
             .market
-            .lock_request(&order.request, order.client_sig.clone(), conf_priority_gas)
+            .lock_request(&order.request, order.client_sig.clone(), Some(conf_priority_gas))
             .await
             .map_err(|e| -> OrderMonitorErr {
                 match e {
@@ -898,7 +898,10 @@ where
                 // Process new orders from the channel as soon as they arrive
                 biased;
 
-                Some(result) = self.priced_order_rx.lock().await.recv() => {
+                Some(result) = {
+                    let rx = self.priced_order_rx.lock().await;
+                    rx.recv()
+                } => {
                     self.handle_new_order_result(result).await?;
                 }
 
