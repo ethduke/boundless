@@ -253,9 +253,9 @@ where
             
             // Calculate dynamic priority fee based on order value
             let order_value = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
-            let value_multiplier = if order_value > U256::from(1_000_000_000_000_000_000) { // > 1 ETH
+            let value_multiplier = if order_value > U256::from(1_000_000_000_000_000_000u64) { // > 1 ETH
                 3 // Triple priority for high value orders
-            } else if order_value > U256::from(100_000_000_000_000_000) { // > 0.1 ETH
+            } else if order_value > U256::from(100_000_000_000_000_000u64) { // > 0.1 ETH
                 2 // Double priority for medium value orders
             } else {
                 1 // Standard priority for low value orders
