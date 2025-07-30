@@ -899,8 +899,11 @@ where
                 biased;
 
                 Some(result) = {
-                    let mut rx = self.priced_order_rx.lock().await;
-                    rx.recv()
+                    let rx = self.priced_order_rx.clone();
+                    async move {
+                        let mut guard = rx.lock().await;
+                        guard.recv().await
+                    }
                 } => {
                     self.handle_new_order_result(result).await?;
                 }
@@ -1008,6 +1011,8 @@ where
     }
 
     // Called when a new order result is received from the channel
+
+
     async fn handle_new_order_result(
         &self,
         order: Box<OrderRequest>,
