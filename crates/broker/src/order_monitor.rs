@@ -266,7 +266,7 @@ where
             tracing::debug!(
                 "Order value: {}, using priority fee: {} gwei ({}x multiplier)",
                 format_ether(order_value),
-                (dynamic_priority / U256::from(1_000_000_000)).try_into().unwrap_or(0),
+                dynamic_priority / 1_000_000_000,
                 value_multiplier
             );
             
@@ -899,7 +899,7 @@ where
                 biased;
 
                 Some(result) = {
-                    let rx = self.priced_order_rx.lock().await;
+                    let mut rx = self.priced_order_rx.lock().await;
                     rx.recv()
                 } => {
                     self.handle_new_order_result(result).await?;
