@@ -859,7 +859,7 @@ where
         };
         
         // Adjust cycle limits based on realistic performance
-        let adjusted_cycles = if realistic_peak_khz < 500 {
+        let _adjusted_cycles = if realistic_peak_khz < 500 {
             // Conservative cycle limit for lower performance setups
             proof_res.stats.total_cycles * 80 / 100 // 80% of cycles
         } else {

@@ -993,26 +993,6 @@ where
                                 self.lock_and_prove_orders(&final_orders).await?;
                             }
                         }
-
-
-                        let final_orders = self
-                            .apply_capacity_limits(
-                                valid_orders,
-                                &monitor_config,
-                                &mut prev_orders_by_status,
-                            )
-                            .await?;
-
-                        tracing::trace!("After processing block {}[timestamp {}], we will now start locking and/or proving {} orders.",
-                            block_number,
-                            block_timestamp,
-                            final_orders.len(),
-                        );
-
-                        if !final_orders.is_empty() {
-                            // Lock and prove filtered orders.
-                            self.lock_and_prove_orders(&final_orders).await?;
-                        }
                     }
                 }
                 _ = cancel_token.cancelled() => {
