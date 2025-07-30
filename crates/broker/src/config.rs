@@ -89,11 +89,13 @@ pub enum OrderPricingPriority {
     ObservationTime,
     /// Process orders by shortest expiry first (earliest deadline)
     ShortestExpiry,
+    /// OPTIMIZATION: Process LockAndFulfill orders first for ultra-fast locking
+    LockAndFulfillFirst,
 }
 
 impl Default for OrderPricingPriority {
     fn default() -> Self {
-        Self::Random
+        Self::LockAndFulfillFirst // OPTIMIZATION: Default to LockAndFulfillFirst for speed
     }
 }
 
@@ -105,11 +107,13 @@ pub enum OrderCommitmentPriority {
     Random,
     /// Process orders by shortest expiry first (lock expiry for lock-and-fulfill orders, request expiry for others)
     ShortestExpiry,
+    /// OPTIMIZATION: Process LockAndFulfill orders first for ultra-fast locking
+    LockAndFulfillFirst,
 }
 
 impl Default for OrderCommitmentPriority {
     fn default() -> Self {
-        Self::Random
+        Self::LockAndFulfillFirst // OPTIMIZATION: Default to LockAndFulfillFirst for speed
     }
 }
 

@@ -23,11 +23,13 @@ use rand::seq::SliceRandom;
 use std::sync::Arc;
 
 /// Unified priority mode for both pricing and commitment
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnifiedPriorityMode {
     Random,
     TimeOrdered,
     ShortestExpiry,
+    // OPTIMIZATION: New priority mode for LockAndFulfill orders
+    LockAndFulfillFirst,
 }
 
 impl From<OrderPricingPriority> for UnifiedPriorityMode {
@@ -36,6 +38,8 @@ impl From<OrderPricingPriority> for UnifiedPriorityMode {
             OrderPricingPriority::Random => UnifiedPriorityMode::Random,
             OrderPricingPriority::ObservationTime => UnifiedPriorityMode::TimeOrdered,
             OrderPricingPriority::ShortestExpiry => UnifiedPriorityMode::ShortestExpiry,
+            // OPTIMIZATION: Map to LockAndFulfillFirst for ultra-fast processing
+            OrderPricingPriority::LockAndFulfillFirst => UnifiedPriorityMode::LockAndFulfillFirst,
         }
     }
 }
@@ -44,7 +48,10 @@ impl From<OrderCommitmentPriority> for UnifiedPriorityMode {
     fn from(mode: OrderCommitmentPriority) -> Self {
         match mode {
             OrderCommitmentPriority::Random => UnifiedPriorityMode::Random,
+            OrderCommitmentPriority::ObservationTime => UnifiedPriorityMode::TimeOrdered,
             OrderCommitmentPriority::ShortestExpiry => UnifiedPriorityMode::ShortestExpiry,
+            // OPTIMIZATION: Map to LockAndFulfillFirst for ultra-fast processing
+            OrderCommitmentPriority::LockAndFulfillFirst => UnifiedPriorityMode::LockAndFulfillFirst,
         }
     }
 }
@@ -89,6 +96,17 @@ where
                     _ => order_ref.request.expires_at(),
                 }
             });
+        }
+        UnifiedPriorityMode::LockAndFulfillFirst => {
+            let (mut lock_and_fulfill_orders, mut other_orders): (Vec<T>, Vec<T>) = orders
+                .drain(..)
+                .partition(|order| order.as_ref().fulfillment_type == FulfillmentType::LockAndFulfill);
+
+            sort_by_mode(&mut lock_and_fulfill_orders, UnifiedPriorityMode::ShortestExpiry);
+            sort_by_mode(&mut other_orders, UnifiedPriorityMode::ShortestExpiry);
+
+            orders.extend(lock_and_fulfill_orders);
+            orders.extend(other_orders);
         }
     }
 }

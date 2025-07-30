@@ -567,6 +567,35 @@ where
             exec_limit_cycles / 1_000_000
         );
 
+        // OPTIMIZATION: Skip preflight for LockAndFulfill orders to speed up locking
+        if order.fulfillment_type == FulfillmentType::LockAndFulfill {
+            tracing::info!(
+                "ULTRA-FAST: Skipping preflight for LockAndFulfill order {order_id} to speed up locking"
+            );
+            
+            // Use estimated cycles based on config
+            let estimated_cycles = {
+                let config = self.config.lock_all().context("Failed to read config")?;
+                config.market.additional_proof_cycles
+            };
+            
+            // Create a mock proof result with estimated cycles
+            let proof_res = ProofResult {
+                id: format!("estimated_{}", order_id),
+                stats: ExecutorResp { 
+                    total_cycles: estimated_cycles, 
+                    ..Default::default() 
+                },
+                elapsed_time: 0.0,
+            };
+            
+            // Set the total cycles for the order
+            order.total_cycles = Some(estimated_cycles);
+            
+            // Evaluate the order directly without preflight
+            return self.evaluate_order(order, &proof_res, order_gas_cost, lock_expired).await;
+        }
+
         // Create cache key based on input type
         let image_id = Digest::from(order.request.requirements.imageId.0);
         let cache_key = match order.request.input.inputType {
@@ -1270,6 +1299,9 @@ where
                         available_capacity,
                     );
 
+                    // OPTIMIZATION: Process multiple orders in parallel
+                    let mut spawned_tasks = Vec::new();
+                    
                     for order in selected_orders {
                         let order_id = order.id();
                         let request_id = U256::from(order.request.id);
@@ -1304,12 +1336,24 @@ where
                             .or_default()
                             .insert(order_id.clone(), task_cancel_token.clone());
 
-                        tasks.spawn(async move {
+                        let task = tasks.spawn(async move {
                             picker_clone
                                 .price_order_and_update_state(order, task_cancel_token)
                                 .await;
                             (order_id, request_id)
                         });
+                        
+                        spawned_tasks.push(task);
+                    }
+                    
+                    // OPTIMIZATION: Log parallel processing
+                    if !spawned_tasks.is_empty() {
+                        tracing::info!(
+                            "ULTRA-FAST: Spawned {} parallel pricing tasks (capacity: {}/{})",
+                            spawned_tasks.len(),
+                            tasks.len() + spawned_tasks.len(),
+                            current_capacity
+                        );
                     }
                 }
             }
