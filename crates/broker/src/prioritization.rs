@@ -122,28 +122,6 @@ impl<P> OrderMonitor<P> {
         priority_mode: OrderCommitmentPriority,
         priority_addresses: Option<&[alloy::primitives::Address]>,
     ) -> Vec<Arc<OrderRequest>> {
-        // OPTIMIZATION: Prioritize LockAndFulfill orders for primary prover advantage
-        orders.sort_by(|a, b| {
-            let a_is_lock_and_fulfill = matches!(a.fulfillment_type, FulfillmentType::LockAndFulfill);
-            let b_is_lock_and_fulfill = matches!(b.fulfillment_type, FulfillmentType::LockAndFulfill);
-            
-            // LockAndFulfill orders get priority for primary prover advantage
-            match (a_is_lock_and_fulfill, b_is_lock_and_fulfill) {
-                (true, false) => std::cmp::Ordering::Less, // a comes first
-                (false, true) => std::cmp::Ordering::Greater, // b comes first
-                _ => std::cmp::Ordering::Equal, // same type, use other criteria
-            }
-        });
-        
-        // OPTIMIZATION: Prioritize orders with smaller price ranges (less competition)
-        orders.sort_by(|a, b| {
-            let a_price_range = a.request.offer.maxPrice.saturating_sub(a.request.offer.minPrice);
-            let b_price_range = b.request.offer.maxPrice.saturating_sub(b.request.offer.minPrice);
-            
-            // Smaller price ranges get priority (less attractive to other provers)
-            a_price_range.cmp(&b_price_range)
-        });
-        
         // Sort orders with priority addresses first, then by mode
         sort_orders_by_priority_and_mode(&mut orders, priority_addresses, priority_mode.into());
 

@@ -54,7 +54,7 @@ use tokio_util::sync::CancellationToken;
 
 use OrderPricingOutcome::{Lock, ProveAfterLockExpire, Skip};
 
-const MIN_CAPACITY_CHECK_INTERVAL: Duration = Duration::from_secs(1); // OPTIMIZATION: Ultra-fast checks for DEGEN MODE
+const MIN_CAPACITY_CHECK_INTERVAL: Duration = Duration::from_secs(2); // OPTIMIZATION: Balanced checks for reliable performance
 
 const ONE_MILLION: U256 = uint!(1_000_000_U256);
 
@@ -1177,14 +1177,6 @@ where
             let mut active_tasks: BTreeMap<U256, BTreeMap<String, CancellationToken>> =
                 BTreeMap::new();
             let mut last_active_tasks_log: String = String::new();
-
-            // OPTIMIZATION: Increase initial capacity for more aggressive processing
-            current_capacity = std::cmp::min(current_capacity * 2, 16); // Double capacity, max 16
-
-            // OPTIMIZATION: Intelligent preflight capacity based on Spanish guide
-            // Use 2-3 concurrent preflights as recommended, ensure at least 3 exec agents
-            let optimal_preflight_capacity = std::cmp::min(current_capacity, 3); // Max 3 as per guide
-            current_capacity = optimal_preflight_capacity;
 
             loop {
                 tokio::select! {

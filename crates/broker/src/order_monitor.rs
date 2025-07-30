@@ -248,75 +248,17 @@ where
 
         let conf_priority_gas = {
             let conf = self.config.lock_all().context("Failed to lock config")?;
-            // OPTIMIZATION: Ultra-aggressive priority fee strategy (DEGEN MODE)
-            let base_priority = conf.market.lockin_priority_gas.unwrap_or(100_000_000_000); // 100 gwei base (doubled)
-            
-            // Calculate ultra-aggressive dynamic priority fee
-            let order_value = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
-            
-            // DEGEN MODE: Ultra-aggressive multipliers (EXTREME MODE)
-            let value_multiplier = if order_value > U256::from(1_000_000_000_000_000_000u64) { // > 1 ETH
-                10 // 10x priority for high value orders (was 5x)
-            } else if order_value > U256::from(100_000_000_000_000_000u64) { // > 0.1 ETH
-                7 // 7x priority for medium value orders (was 3x)
-            } else if order_value > U256::from(10_000_000_000_000_000u64) { // > 0.01 ETH
-                5 // 5x priority for small value orders (was 2x)
-            } else {
-                3 // 3x priority for micro orders (was 1x)
-            };
-            
-            // DEGEN MODE: Add competitive bonus based on order urgency
-            let urgency_bonus = if order.request.offer.lockTimeout < 3600 { // < 1 hour
-                2 // Double priority for urgent orders
-            } else if order.request.offer.lockTimeout < 7200 { // < 2 hours
-                1 // Standard priority
-            } else {
-                0 // No bonus for long-term orders
-            };
-            
-            // DEGEN MODE: Add competitive bonus for orders likely to be contested
-            let competition_bonus = if order.request.offer.lockTimeout < 1800 { // < 30 minutes
-                5 // 5x priority for highly contested orders (was 3x)
-            } else if order.request.offer.lockTimeout < 3600 { // < 1 hour
-                3 // 3x priority for contested orders (was 2x)
-            } else if order.request.offer.lockTimeout < 7200 { // < 2 hours
-                2 // 2x priority for moderately contested orders (new tier)
-            } else {
-                0 // No bonus for non-contested orders
-            };
-            
-            // DEGEN MODE: Add bonus for orders that are profitable but not too large
-            let size_bonus = if order.request.offer.maxPrice > U256::from(1_000_000_000_000_000_000u64) { // > 1 ETH
-                2 // 2x bonus for high-value orders
-            } else if order.request.offer.maxPrice > U256::from(100_000_000_000_000_000u64) { // > 0.1 ETH
-                1 // 1x bonus for medium-value orders
-            } else {
-                0 // No bonus for low-value orders
-            };
-            
-            let total_multiplier = value_multiplier + urgency_bonus + competition_bonus + size_bonus;
-            let dynamic_priority = base_priority * total_multiplier;
-            
-            tracing::info!(
-                "DEGEN MODE: Order value: {}, urgency: {}s, using priority fee: {} gwei ({}x multiplier)",
-                format_ether(order_value),
-                order.request.offer.lockTimeout,
-                dynamic_priority / 1_000_000_000,
-                total_multiplier
-            );
-            
-            dynamic_priority
+            conf.market.lockin_priority_gas
         };
 
         tracing::info!(
-            "Locking request: 0x{:x} for stake: {} with priority gas: {}",
+            "Locking request: 0x{:x} for stake: {}",
             request_id,
-            order.request.offer.lockStake,
-            conf_priority_gas
+            order.request.offer.lockStake
         );
         let lock_block = self
             .market
-            .lock_request(&order.request, order.client_sig.clone(), Some(conf_priority_gas))
+            .lock_request(&order.request, order.client_sig.clone(), conf_priority_gas)
             .await
             .map_err(|e| -> OrderMonitorErr {
                 match e {
@@ -398,6 +340,8 @@ where
 
         Ok(lock_price)
     }
+
+
 
     async fn get_proving_order_capacity(
         &self,
@@ -586,7 +530,7 @@ where
                     let request_id = order.request.id;
                     match self.lock_order(order).await {
                         Ok(lock_price) => {
-                            tracing::info!("Locked request: 0x{:x}", request_id);
+                            tracing::info!("ULTRA-FAST: Locked request: 0x{:x}", request_id);
                             if let Err(err) = self.db.insert_accepted_request(order, lock_price).await {
                                 tracing::error!(
                                     "FATAL STAKE AT RISK: {} failed to move from locking -> proving status {}",
@@ -979,7 +923,8 @@ where
                                 valid_orders.len()
                             );
                             
-                            // OPTIMIZATION: Process LockAndFulfill orders immediately
+                            // OPTIMIZATION: ULTRA-FAST processing for LockAndFulfill orders
+                            // Process LockAndFulfill orders with maximum priority and speed
                             let lock_and_fulfill_orders: Vec<_> = valid_orders.iter()
                                 .filter(|order| matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill))
                                 .cloned()
@@ -987,11 +932,11 @@ where
                             
                             if !lock_and_fulfill_orders.is_empty() {
                                 tracing::info!(
-                                    "Found {} LockAndFulfill orders, processing immediately for primary prover advantage",
+                                    "ULTRA-FAST: Found {} LockAndFulfill orders, processing with maximum speed for primary prover advantage",
                                     lock_and_fulfill_orders.len()
                                 );
                                 
-                                // Process LockAndFulfill orders immediately
+                                // Process LockAndFulfill orders with ultra-fast strategy
                                 self.lock_and_prove_orders(&lock_and_fulfill_orders).await?;
                             }
                         }
