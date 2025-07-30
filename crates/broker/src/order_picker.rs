@@ -818,19 +818,19 @@ where
 
         // OPTIMIZATION: Accept orders with lower profitability to increase primary prover chances
         // Reduce the minimum price threshold by 20% to accept more orders
-        let reduced_min_price = config_min_mcycle_price * 80 / 100; // 80% of original minimum
+        let reduced_min_price = config_min_mcycle_price * U256::from(80) / U256::from(100); // 80% of original minimum
         
         // OPTIMIZATION: Dynamic pricing strategy based on Spanish guide
         // Be competitive but not too low to remain profitable
-        let competitive_min_price = if mcycle_price_max > config_min_mcycle_price * 3 {
+        let competitive_min_price = if mcycle_price_max > config_min_mcycle_price * U256::from(3) {
             // For high value orders, be more competitive
-            config_min_mcycle_price * 70 / 100 // 70% for high value
-        } else if mcycle_price_max > config_min_mcycle_price * 2 {
+            config_min_mcycle_price * U256::from(70) / U256::from(100) // 70% for high value
+        } else if mcycle_price_max > config_min_mcycle_price * U256::from(2) {
             // For medium value orders, standard competitive pricing
-            config_min_mcycle_price * 80 / 100 // 80% for medium value
+            config_min_mcycle_price * U256::from(80) / U256::from(100) // 80% for medium value
         } else {
             // For low value orders, maintain profitability
-            config_min_mcycle_price * 90 / 100 // 90% for low value
+            config_min_mcycle_price * U256::from(90) / U256::from(100) // 90% for low value
         };
         
         if mcycle_price_max < competitive_min_price {
@@ -841,11 +841,11 @@ where
         // OPTIMIZATION: Target orders that are less attractive to other provers
         // Focus on orders with lower rewards but still profitable for us
         let order_attractiveness = mcycle_price_max.saturating_sub(mcycle_price_min);
-        let is_high_value_order = order_attractiveness > config_min_mcycle_price * 2; // High value orders
+        let is_high_value_order = order_attractiveness > config_min_mcycle_price * U256::from(2); // High value orders
         
         // OPTIMIZATION: Prioritize orders with smaller price ranges (less competition)
         let price_range = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
-        let is_small_range_order = price_range < order.request.offer.maxPrice / 4; // Less than 25% range
+        let is_small_range_order = price_range < order.request.offer.maxPrice / U256::from(4); // Less than 25% range
         
         // OPTIMIZATION: Target orders with shorter lock timeouts (less attractive to other provers)
         let lock_timeout = order.request.offer.lockTimeout;

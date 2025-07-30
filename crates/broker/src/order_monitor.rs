@@ -266,7 +266,7 @@ where
             tracing::debug!(
                 "Order value: {}, using priority fee: {} gwei ({}x multiplier)",
                 format_ether(order_value),
-                dynamic_priority / 1_000_000_000,
+                dynamic_priority / U256::from(1_000_000_000),
                 value_multiplier
             );
             
