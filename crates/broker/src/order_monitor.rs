@@ -248,26 +248,50 @@ where
 
         let conf_priority_gas = {
             let conf = self.config.lock_all().context("Failed to lock config")?;
-            // OPTIMIZATION: Advanced priority fee strategy based on order value
-            let base_priority = conf.market.lockin_priority_gas.unwrap_or(50_000_000_000); // 50 gwei base
+            // OPTIMIZATION: Ultra-aggressive priority fee strategy (DEGEN MODE)
+            let base_priority = conf.market.lockin_priority_gas.unwrap_or(100_000_000_000); // 100 gwei base (doubled)
             
-            // Calculate dynamic priority fee based on order value
+            // Calculate ultra-aggressive dynamic priority fee
             let order_value = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
+            
+            // DEGEN MODE: Much more aggressive multipliers
             let value_multiplier = if order_value > U256::from(1_000_000_000_000_000_000u64) { // > 1 ETH
-                3 // Triple priority for high value orders
+                5 // 5x priority for high value orders (was 3x)
             } else if order_value > U256::from(100_000_000_000_000_000u64) { // > 0.1 ETH
-                2 // Double priority for medium value orders
+                3 // 3x priority for medium value orders (was 2x)
+            } else if order_value > U256::from(10_000_000_000_000_000u64) { // > 0.01 ETH
+                2 // 2x priority for small value orders (new tier)
             } else {
-                1 // Standard priority for low value orders
+                1 // Standard priority for micro orders
             };
             
-            let dynamic_priority = base_priority * value_multiplier;
+            // DEGEN MODE: Add competitive bonus based on order urgency
+            let urgency_bonus = if order.request.offer.lockTimeout < 3600 { // < 1 hour
+                2 // Double priority for urgent orders
+            } else if order.request.offer.lockTimeout < 7200 { // < 2 hours
+                1 // Standard priority
+            } else {
+                0 // No bonus for long-term orders
+            };
             
-            tracing::debug!(
-                "Order value: {}, using priority fee: {} gwei ({}x multiplier)",
+            // DEGEN MODE: Add competitive bonus for orders likely to be contested
+            let competition_bonus = if order.request.offer.lockTimeout < 1800 { // < 30 minutes
+                3 // Triple priority for highly contested orders
+            } else if order.request.offer.lockTimeout < 3600 { // < 1 hour
+                2 // Double priority for contested orders
+            } else {
+                0 // No bonus for non-contested orders
+            };
+            
+            let total_multiplier = value_multiplier + urgency_bonus + competition_bonus;
+            let dynamic_priority = base_priority * total_multiplier;
+            
+            tracing::info!(
+                "DEGEN MODE: Order value: {}, urgency: {}s, using priority fee: {} gwei ({}x multiplier)",
                 format_ether(order_value),
+                order.request.offer.lockTimeout,
                 dynamic_priority / 1_000_000_000,
-                value_multiplier
+                total_multiplier
             );
             
             dynamic_priority
