@@ -54,7 +54,7 @@ use tokio_util::sync::CancellationToken;
 
 use OrderPricingOutcome::{Lock, ProveAfterLockExpire, Skip};
 
-const MIN_CAPACITY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+const MIN_CAPACITY_CHECK_INTERVAL: Duration = Duration::from_secs(2); // OPTIMIZATION: More frequent checks
 
 const ONE_MILLION: U256 = uint!(1_000_000_U256);
 
@@ -816,6 +816,72 @@ where
             return Ok(Skip);
         }
 
+        // OPTIMIZATION: Accept orders with lower profitability to increase primary prover chances
+        // Reduce the minimum price threshold by 20% to accept more orders
+        let reduced_min_price = config_min_mcycle_price * 80 / 100; // 80% of original minimum
+        
+        // OPTIMIZATION: Dynamic pricing strategy based on Spanish guide
+        // Be competitive but not too low to remain profitable
+        let competitive_min_price = if mcycle_price_max > config_min_mcycle_price * 3 {
+            // For high value orders, be more competitive
+            config_min_mcycle_price * 70 / 100 // 70% for high value
+        } else if mcycle_price_max > config_min_mcycle_price * 2 {
+            // For medium value orders, standard competitive pricing
+            config_min_mcycle_price * 80 / 100 // 80% for medium value
+        } else {
+            // For low value orders, maintain profitability
+            config_min_mcycle_price * 90 / 100 // 90% for low value
+        };
+        
+        if mcycle_price_max < competitive_min_price {
+            tracing::debug!("Removing under priced order {order_id} (even with competitive pricing)");
+            return Ok(Skip);
+        }
+
+        // OPTIMIZATION: Target orders that are less attractive to other provers
+        // Focus on orders with lower rewards but still profitable for us
+        let order_attractiveness = mcycle_price_max.saturating_sub(mcycle_price_min);
+        let is_high_value_order = order_attractiveness > config_min_mcycle_price * 2; // High value orders
+        
+        // OPTIMIZATION: Prioritize orders with smaller price ranges (less competition)
+        let price_range = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
+        let is_small_range_order = price_range < order.request.offer.maxPrice / 4; // Less than 25% range
+        
+        // OPTIMIZATION: Target orders with shorter lock timeouts (less attractive to other provers)
+        let lock_timeout = order.request.offer.lockTimeout;
+        let is_short_timeout_order = lock_timeout < 300; // Less than 5 minutes
+        
+        // OPTIMIZATION: Realistic peak KHZ management (Spanish guide)
+        // Don't overcommit if you can't deliver the promised performance
+        let realistic_peak_khz = {
+            let config = self.config.lock_all().context("Failed to read config")?;
+            config.market.peak_prove_khz.unwrap_or(420) // Default realistic value
+        };
+        
+        // Adjust cycle limits based on realistic performance
+        let adjusted_cycles = if realistic_peak_khz < 500 {
+            // Conservative cycle limit for lower performance setups
+            proof_res.stats.total_cycles * 80 / 100 // 80% of cycles
+        } else {
+            // Full cycle limit for high performance setups
+            proof_res.stats.total_cycles
+        };
+        
+        // For high value orders, be more aggressive with timing
+        let timing_multiplier = if is_high_value_order {
+            tracing::debug!("Order {order_id} is high value (attractiveness: {}), using aggressive timing", format_ether(order_attractiveness));
+            2 // Double the aggressive timing for high value orders
+        } else if is_small_range_order {
+            tracing::debug!("Order {order_id} has small price range ({}), using standard timing", format_ether(price_range));
+            1 // Standard timing for small range orders
+        } else if is_short_timeout_order {
+            tracing::debug!("Order {order_id} has short timeout ({}s), using aggressive timing", lock_timeout);
+            2 // Aggressive timing for short timeout orders
+        } else {
+            tracing::debug!("Order {order_id} is standard value (attractiveness: {}), using standard timing", format_ether(order_attractiveness));
+            1 // Standard aggressive timing
+        };
+
         let target_timestamp_secs = if mcycle_price_min >= config_min_mcycle_price {
             tracing::info!(
                 "Selecting order {order_id} at price {} - ASAP",
@@ -823,20 +889,41 @@ where
             );
             0 // Schedule the lock ASAP
         } else {
-            let target_min_price = config_min_mcycle_price
+            // OPTIMIZATION: Use reduced minimum price for more aggressive locking
+            let target_min_price = reduced_min_price
                 .saturating_mul(U256::from(proof_res.stats.total_cycles))
                 .div_ceil(ONE_MILLION)
                 + order_gas_cost;
             tracing::debug!(
-                "Order {order_id} minimum profitable price: {} ETH",
+                "Order {order_id} minimum profitable price (reduced): {} ETH",
                 format_ether(target_min_price)
             );
 
-            order
+            // Calculate the original target timestamp
+            let original_target = order
                 .request
                 .offer
                 .time_at_price(target_min_price)
-                .context("Failed to get target price timestamp")?
+                .context("Failed to get target price timestamp")?;
+            
+            // OPTIMIZATION: Lock immediately if profitable, otherwise use aggressive timing
+            let aggressive_target = if mcycle_price_min >= reduced_min_price {
+                // If already profitable at minimum price, lock immediately
+                0
+            } else if original_target > (30 * timing_multiplier) {
+                original_target - (30 * timing_multiplier)
+            } else {
+                0 // Lock immediately if we can't subtract the calculated time
+            };
+            
+            tracing::debug!(
+                "Order {order_id} aggressive locking: original {}, aggressive {} (immediate: {})",
+                original_target,
+                aggressive_target,
+                mcycle_price_min >= reduced_min_price
+            );
+            
+            aggressive_target
         };
 
         let expiry_secs = order.request.offer.biddingStart + order.request.offer.lockTimeout as u64;
@@ -1090,6 +1177,14 @@ where
             let mut active_tasks: BTreeMap<U256, BTreeMap<String, CancellationToken>> =
                 BTreeMap::new();
             let mut last_active_tasks_log: String = String::new();
+
+            // OPTIMIZATION: Increase initial capacity for more aggressive processing
+            current_capacity = std::cmp::min(current_capacity * 2, 16); // Double capacity, max 16
+
+            // OPTIMIZATION: Intelligent preflight capacity based on Spanish guide
+            // Use 2-3 concurrent preflights as recommended, ensure at least 3 exec agents
+            let optimal_preflight_capacity = std::cmp::min(current_capacity, 3); // Max 3 as per guide
+            current_capacity = optimal_preflight_capacity;
 
             loop {
                 tokio::select! {

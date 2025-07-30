@@ -248,13 +248,36 @@ where
 
         let conf_priority_gas = {
             let conf = self.config.lock_all().context("Failed to lock config")?;
-            conf.market.lockin_priority_gas
+            // OPTIMIZATION: Advanced priority fee strategy based on order value
+            let base_priority = conf.market.lockin_priority_gas.unwrap_or(50_000_000_000); // 50 gwei base
+            
+            // Calculate dynamic priority fee based on order value
+            let order_value = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
+            let value_multiplier = if order_value > U256::from(1_000_000_000_000_000_000) { // > 1 ETH
+                3 // Triple priority for high value orders
+            } else if order_value > U256::from(100_000_000_000_000_000) { // > 0.1 ETH
+                2 // Double priority for medium value orders
+            } else {
+                1 // Standard priority for low value orders
+            };
+            
+            let dynamic_priority = base_priority * value_multiplier;
+            
+            tracing::debug!(
+                "Order value: {}, using priority fee: {} gwei ({}x multiplier)",
+                format_ether(order_value),
+                dynamic_priority / 1_000_000_000,
+                value_multiplier
+            );
+            
+            dynamic_priority
         };
 
         tracing::info!(
-            "Locking request: 0x{:x} for stake: {}",
+            "Locking request: 0x{:x} for stake: {} with priority gas: {}",
             request_id,
-            order.request.offer.lockStake
+            order.request.offer.lockStake,
+            conf_priority_gas
         );
         let lock_block = self
             .market
@@ -622,9 +645,39 @@ where
         let capacity = self
             .get_proving_order_capacity(config.max_concurrent_proofs, prev_orders_by_status)
             .await?;
-        let capacity_granted: usize = capacity
-            .request_capacity(num_orders.try_into().expect("Failed to convert order count to u32"))
-            as usize;
+        
+        // OPTIMIZATION: Boost capacity for LockAndFulfill orders
+        let capacity_granted: usize = match capacity {
+            Capacity::Available(available) => {
+                let base_capacity = capacity
+                    .request_capacity(num_orders.try_into().expect("Failed to convert order count to u32"))
+                    as usize;
+                
+                // Count LockAndFulfill orders for capacity boost
+                let lock_and_fulfill_count = orders.iter()
+                    .filter(|order| matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill))
+                    .count();
+                
+                // OPTIMIZATION: Intelligent capacity management based on Spanish guide
+                // Limit concurrent proofs to 2 unless multiple GPUs available
+                let max_concurrent = std::cmp::min(available as usize, 2); // Max 2 concurrent as per guide
+                let boosted_capacity = base_capacity + lock_and_fulfill_count;
+                std::cmp::min(boosted_capacity, max_concurrent)
+            }
+            Capacity::Unlimited => {
+                let base_capacity = capacity
+                    .request_capacity(num_orders.try_into().expect("Failed to convert order count to u32"))
+                    as usize;
+                
+                // Count LockAndFulfill orders for capacity boost
+                let lock_and_fulfill_count = orders.iter()
+                    .filter(|order| matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill))
+                    .count();
+                
+                // OPTIMIZATION: Limit to 2 concurrent proofs as per Spanish guide
+                std::cmp::min(base_capacity + lock_and_fulfill_count, 2)
+            }
+        };
 
         tracing::info!(
             "Num orders ready for locking and/or proving: {}. Total capacity available: {capacity:?}, Capacity granted: {capacity_granted:?}",
@@ -825,19 +878,19 @@ where
         Ok(final_orders)
     }
 
+
+
     pub async fn start_monitor(
         self,
         cancel_token: CancellationToken,
     ) -> Result<(), OrderMonitorErr> {
-        let mut last_block = 0;
-        let mut first_block = 0;
         let mut interval = tokio::time::interval_at(
             tokio::time::Instant::now(),
             tokio::time::Duration::from_secs(self.block_time),
         );
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        let mut new_orders = self.priced_order_rx.lock().await;
+        let mut last_block = 0u64;
+        let mut first_block = 0u64;
         let mut prev_orders_by_status = String::new();
 
         loop {
@@ -845,7 +898,7 @@ where
                 // Process new orders from the channel as soon as they arrive
                 biased;
 
-                Some(result) = new_orders.recv() => {
+                Some(result) = self.priced_order_rx.lock().await.recv() => {
                     self.handle_new_order_result(result).await?;
                 }
 
@@ -878,6 +931,30 @@ where
                         // Get orders that are valid and ready for locking/proving, skipping orders that are now invalid for proving, due to expiring, being locked by another prover, etc.
                         let mut valid_orders = self.get_valid_orders(block_timestamp, monitor_config.min_deadline).await?;
 
+                        // OPTIMIZATION: Process orders immediately without waiting for next block
+                        if !valid_orders.is_empty() {
+                            tracing::debug!(
+                                "Found {} valid orders, processing immediately",
+                                valid_orders.len()
+                            );
+                            
+                            // OPTIMIZATION: Process LockAndFulfill orders immediately
+                            let lock_and_fulfill_orders: Vec<_> = valid_orders.iter()
+                                .filter(|order| matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill))
+                                .cloned()
+                                .collect();
+                            
+                            if !lock_and_fulfill_orders.is_empty() {
+                                tracing::info!(
+                                    "Found {} LockAndFulfill orders, processing immediately for primary prover advantage",
+                                    lock_and_fulfill_orders.len()
+                                );
+                                
+                                // Process LockAndFulfill orders immediately
+                                self.lock_and_prove_orders(&lock_and_fulfill_orders).await?;
+                            }
+                        }
+
                         if valid_orders.is_empty() {
                             tracing::trace!(
                                 "No orders to lock and/or prove as of block timestamp {}",
@@ -889,7 +966,35 @@ where
                         // Prioritize the orders that intend to fulfill based on configured commitment priority.
                         valid_orders = self.prioritize_orders(valid_orders, monitor_config.order_commitment_priority, monitor_config.priority_addresses.as_deref());
 
-                        // Filter down the orders given our max concurrent proofs, peak khz limits, and gas limitations.
+                        // OPTIMIZATION: Process remaining orders immediately
+                        if !valid_orders.is_empty() {
+                            // Filter down the orders given our max concurrent proofs, peak khz limits, and gas limitations.
+                            let final_orders = self
+                                .apply_capacity_limits(
+                                    valid_orders,
+                                    &monitor_config,
+                                    &mut prev_orders_by_status,
+                                )
+                                .await?;
+
+                            tracing::trace!("After processing block {}[timestamp {}], we will now start locking and/or proving {} orders.",
+                                block_number,
+                                block_timestamp,
+                                final_orders.len(),
+                            );
+
+                            // OPTIMIZATION: Force batch submission when single proof is ready (Spanish guide)
+                            if !final_orders.is_empty() {
+                                tracing::info!(
+                                    "Forcing batch submission with {} orders (Spanish guide optimization)",
+                                    final_orders.len()
+                                );
+                                // Lock and prove filtered orders.
+                                self.lock_and_prove_orders(&final_orders).await?;
+                            }
+                        }
+
+
                         let final_orders = self
                             .apply_capacity_limits(
                                 valid_orders,
