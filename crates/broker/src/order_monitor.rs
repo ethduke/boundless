@@ -254,15 +254,15 @@ where
             // Calculate ultra-aggressive dynamic priority fee
             let order_value = order.request.offer.maxPrice.saturating_sub(order.request.offer.minPrice);
             
-            // DEGEN MODE: Much more aggressive multipliers
+            // DEGEN MODE: Ultra-aggressive multipliers (EXTREME MODE)
             let value_multiplier = if order_value > U256::from(1_000_000_000_000_000_000u64) { // > 1 ETH
-                5 // 5x priority for high value orders (was 3x)
+                10 // 10x priority for high value orders (was 5x)
             } else if order_value > U256::from(100_000_000_000_000_000u64) { // > 0.1 ETH
-                3 // 3x priority for medium value orders (was 2x)
+                7 // 7x priority for medium value orders (was 3x)
             } else if order_value > U256::from(10_000_000_000_000_000u64) { // > 0.01 ETH
-                2 // 2x priority for small value orders (new tier)
+                5 // 5x priority for small value orders (was 2x)
             } else {
-                1 // Standard priority for micro orders
+                3 // 3x priority for micro orders (was 1x)
             };
             
             // DEGEN MODE: Add competitive bonus based on order urgency
@@ -276,14 +276,25 @@ where
             
             // DEGEN MODE: Add competitive bonus for orders likely to be contested
             let competition_bonus = if order.request.offer.lockTimeout < 1800 { // < 30 minutes
-                3 // Triple priority for highly contested orders
+                5 // 5x priority for highly contested orders (was 3x)
             } else if order.request.offer.lockTimeout < 3600 { // < 1 hour
-                2 // Double priority for contested orders
+                3 // 3x priority for contested orders (was 2x)
+            } else if order.request.offer.lockTimeout < 7200 { // < 2 hours
+                2 // 2x priority for moderately contested orders (new tier)
             } else {
                 0 // No bonus for non-contested orders
             };
             
-            let total_multiplier = value_multiplier + urgency_bonus + competition_bonus;
+            // DEGEN MODE: Add bonus for orders that are profitable but not too large
+            let size_bonus = if order.request.offer.maxPrice > U256::from(1_000_000_000_000_000_000u64) { // > 1 ETH
+                2 // 2x bonus for high-value orders
+            } else if order.request.offer.maxPrice > U256::from(100_000_000_000_000_000u64) { // > 0.1 ETH
+                1 // 1x bonus for medium-value orders
+            } else {
+                0 // No bonus for low-value orders
+            };
+            
+            let total_multiplier = value_multiplier + urgency_bonus + competition_bonus + size_bonus;
             let dynamic_priority = base_priority * total_multiplier;
             
             tracing::info!(

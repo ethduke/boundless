@@ -54,7 +54,7 @@ use tokio_util::sync::CancellationToken;
 
 use OrderPricingOutcome::{Lock, ProveAfterLockExpire, Skip};
 
-const MIN_CAPACITY_CHECK_INTERVAL: Duration = Duration::from_secs(2); // OPTIMIZATION: More frequent checks
+const MIN_CAPACITY_CHECK_INTERVAL: Duration = Duration::from_secs(1); // OPTIMIZATION: Ultra-fast checks for DEGEN MODE
 
 const ONE_MILLION: U256 = uint!(1_000_000_U256);
 
