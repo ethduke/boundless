@@ -81,7 +81,7 @@ fn sort_orders_by_priority_and_mode<T>(
 
 fn sort_by_mode<T>(orders: &mut [T], mode: UnifiedPriorityMode)
 where
-    T: AsRef<OrderRequest>,
+    T: AsRef<OrderRequest> + Clone,
 {
     match mode {
         UnifiedPriorityMode::Random => orders.shuffle(&mut rand::rng()),
@@ -108,9 +108,9 @@ where
             sort_by_mode(&mut other_orders, UnifiedPriorityMode::ShortestExpiry);
 
             // Clear and rebuild the original slice
-            orders.clear();
-            orders.extend_from_slice(&lock_and_fulfill_orders);
-            orders.extend_from_slice(&other_orders);
+            orders.iter_mut().zip(lock_and_fulfill_orders.iter().chain(other_orders.iter())).for_each(|(dest, src)| {
+                *dest = src.clone();
+            });
         }
     }
 }
