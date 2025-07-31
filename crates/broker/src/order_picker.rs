@@ -1226,11 +1226,11 @@ where
                             tracing::debug!(
                                 "Processing LockAndFulfill order {order_id} immediately without queuing"
                             );
-                            return Ok(OrderPricingOutcome::Lock {
-                                total_cycles: estimated_cycles,
-                                target_timestamp_secs: now_timestamp(), // Lock immediately
-                                expiry_secs: order.request.lock_expires_at(),
-                            });
+                            
+                            // Send LockAndFulfill orders directly to the order monitor
+                            if let Err(e) = picker.priced_orders_tx.send(order).await {
+                                tracing::error!("Failed to send LockAndFulfill order {} to order monitor: {}", order_id, e);
+                            }
                         } else {
                             pending_orders.push(order);
                             tracing::debug!(

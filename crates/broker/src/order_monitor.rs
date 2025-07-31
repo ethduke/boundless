@@ -717,7 +717,10 @@ where
         }
         
         // Wait for all lock attempts to complete
-        let results = futures::future::join_all(tasks).await;
+        let mut results = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            results.push(result);
+        }
         
         let mut success_count = 0;
         let mut failure_count = 0;
