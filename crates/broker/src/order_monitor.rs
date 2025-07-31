@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::chain_monitor::ChainHead;
-use crate::OrderRequest;
 use crate::{
     chain_monitor::ChainMonitorService,
     config::{ConfigLock, OrderCommitmentPriority},
-    db::DbObj,
+    db::{DbError, DbObj},
     errors::CodedError,
     impl_coded_debug, now_timestamp,
+    market::BoundlessMarketService,
     task::{RetryRes, RetryTask, SupervisorErr},
-    utils, FulfillmentType, Order,
+    utils, FulfillmentType, Order, OrderRequest, SupportedSelectors,
 };
 use alloy::{
     network::Ethereum,
@@ -81,12 +80,6 @@ impl CodedError for OrderMonitorErr {
             OrderMonitorErr::RpcErr(_) => "[B-OM-011]",
             OrderMonitorErr::UnexpectedError(_) => "[B-OM-500]",
         }
-    }
-}
-
-impl From<anyhow::Error> for OrderMonitorErr {
-    fn from(err: anyhow::Error) -> Self {
-        OrderMonitorErr::UnexpectedError(err)
     }
 }
 
