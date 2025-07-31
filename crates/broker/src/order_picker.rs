@@ -1272,12 +1272,19 @@ where
 
                         let order_id_clone = order_id.clone();
                         let request_id_clone = request_id.clone();
-                        tasks.spawn(async move {
+                        let _ = tasks.spawn(async move {
                             picker_clone
                                 .price_order_and_update_state(order, task_cancel_token)
                                 .await;
                             (order_id_clone, request_id_clone)
                         });
+                        
+                        // Log the spawned task for LockAndFulfill orders
+                        if order.fulfillment_type == FulfillmentType::LockAndFulfill {
+                            tracing::info!(
+                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id}"
+                            );
+                        }
                     }
                 }
             }

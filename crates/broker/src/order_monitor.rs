@@ -65,7 +65,7 @@ pub enum OrderMonitorErr {
     RpcErr(anyhow::Error),
 
     #[error("{code} Unexpected error: {0:?}", code = self.code())]
-    UnexpectedError(#[from] anyhow::Error),
+    UnexpectedError(anyhow::Error),
 }
 
 impl_coded_debug!(OrderMonitorErr);
@@ -86,6 +86,12 @@ impl CodedError for OrderMonitorErr {
 impl From<DbError> for OrderMonitorErr {
     fn from(err: DbError) -> Self {
         OrderMonitorErr::UnexpectedError(anyhow::anyhow!(err))
+    }
+}
+
+impl From<anyhow::Error> for OrderMonitorErr {
+    fn from(err: anyhow::Error) -> Self {
+        OrderMonitorErr::UnexpectedError(err)
     }
 }
 
@@ -244,8 +250,7 @@ where
         let is_locked = self
             .db
             .is_request_locked(U256::from(order.request.id))
-            .await
-            .context("Failed to check if request is locked")?;
+            .await?;
         if is_locked {
             tracing::warn!("Request 0x{:x} already locked: {order_status:?}, skipping", request_id);
             return Err(OrderMonitorErr::AlreadyLocked);
