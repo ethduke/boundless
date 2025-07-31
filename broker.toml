@@ -90,7 +90,7 @@ max_critical_task_retries = 10
 # Optional additional gas to add to the transaction for lockinRequest, good
 # for increasing the priority if competing with multiple provers during the
 # same block
-lockin_priority_gas = 100000000000000
+lockin_priority_gas = 500000000000000
 # Optional balance warning threshold (in native token)
 #
 # If the submitter balance drops below this the broker will issue warning logs
@@ -115,12 +115,12 @@ cache_dir = "./cache"
 #
 # Used for estimating the gas costs associated with an order during pricing. If not set a
 # conservative default will be used.
-lockin_gas_estimate = 500000
+lockin_gas_estimate = 800000
 # Gas estimate for fulfill call
 #
 # Used for estimating the gas costs associated with an order during pricing. If not set a
 # conservative default will be used.
-fulfill_gas_estimate = 1000000
+fulfill_gas_estimate = 1500000
 # Gas estimate for proof verification using the RiscZeroGroth16Verifier
 #
 # Used for estimating the gas costs associated with an order during pricing. If not set a
@@ -185,7 +185,7 @@ min_batch_size = 1
 block_deadline_buffer_secs = 120
 # Timeout, in seconds for transaction confirmations
 # Increased from 30s to 60s to give more time for transactions
-txn_timeout = 45
+txn_timeout = 60
 # Use the single TXN submission that batches submit_merkle / fulfill_batch into
 #
 # A single transaction. Requires the `submitRootAndFulfill` method
