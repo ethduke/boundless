@@ -66,7 +66,7 @@ pub enum OrderMonitorErr {
     RpcErr(anyhow::Error),
 
     #[error("{code} Unexpected error: {0:?}", code = self.code())]
-    UnexpectedError(#[from] anyhow::Error),
+    UnexpectedError(anyhow::Error),
 }
 
 impl_coded_debug!(OrderMonitorErr);
@@ -81,18 +81,6 @@ impl CodedError for OrderMonitorErr {
             OrderMonitorErr::RpcErr(_) => "[B-OM-011]",
             OrderMonitorErr::UnexpectedError(_) => "[B-OM-500]",
         }
-    }
-}
-
-impl From<anyhow::Error> for OrderMonitorErr {
-    fn from(err: anyhow::Error) -> Self {
-        OrderMonitorErr::UnexpectedError(err)
-    }
-}
-
-impl From<DbError> for OrderMonitorErr {
-    fn from(err: DbError) -> Self {
-        OrderMonitorErr::UnexpectedError(anyhow::anyhow!("Database error: {}", err))
     }
 }
 
