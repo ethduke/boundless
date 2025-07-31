@@ -419,11 +419,8 @@ impl<P: Provider> BoundlessMarketService<P> {
                 .context("Failed to get priority gas fee")?;
 
             call = call
-                .gas_limit(500000) // Set explicit gas limit to avoid "gas required exceeds allowance"
                 .max_fee_per_gas(priority_fee.max_fee_per_gas + gas as u128)
                 .max_priority_fee_per_gas(priority_fee.max_priority_fee_per_gas + gas as u128);
-        } else {
-            call = call.gas_limit(500000); // Set explicit gas limit even without priority gas
         }
 
         tracing::trace!("Sending tx {}", format!("{:?}", call));
