@@ -315,6 +315,11 @@ where
             // Set estimated cycles and return immediate lock outcome
             order.total_cycles = Some(estimated_cycles);
             
+            // ULTRA-AGGRESSIVE: Skip all gas checks for LockAndFulfill orders
+            tracing::info!(
+                "ULTRA-AGGRESSIVE: Bypassing gas checks for LockAndFulfill order {order_id}"
+            );
+            
             return Ok(OrderPricingOutcome::Lock {
                 total_cycles: estimated_cycles,
                 target_timestamp_secs: now_timestamp(), // Lock immediately
@@ -1234,17 +1239,40 @@ where
                     // This channel is cancellation safe, so it's fine to use in the select!
                     Some(order) = rx.recv() => {
                         let order_id = order.id();
-                        pending_orders.push(order);
-                        tracing::debug!(
-                            "Queued order {} to be priced. Currently {} queued pricing tasks: {}",
-                            order_id,
-                            pending_orders.len(),
-                            pending_orders
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        );
+                        
+                        // ULTRA-AGGRESSIVE: Process LockAndFulfill orders immediately
+                        if order.fulfillment_type == FulfillmentType::LockAndFulfill {
+                            tracing::info!(
+                                "ULTRA-AGGRESSIVE: Processing LockAndFulfill order {order_id} immediately without queuing"
+                            );
+                            
+                            // Process LockAndFulfill orders immediately
+                            let picker_clone = picker.clone();
+                            let task_cancel_token = cancel_token.child_token();
+                            
+                            let task = tasks.spawn(async move {
+                                picker_clone
+                                    .price_order_and_update_state(order, task_cancel_token)
+                                    .await;
+                                (order_id.clone(), U256::from(order.request.id))
+                            });
+                            
+                            tracing::info!(
+                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id}"
+                            );
+                        } else {
+                            pending_orders.push(order);
+                            tracing::debug!(
+                                "Queued order {} to be priced. Currently {} queued pricing tasks: {}",
+                                order_id,
+                                pending_orders.len(),
+                                pending_orders
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            );
+                        }
                     }
                     Ok(state_change) = order_state_rx.recv() => {
                         match state_change {
