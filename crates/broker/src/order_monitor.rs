@@ -172,7 +172,7 @@ pub struct OrderMonitor<P> {
 
 impl<P> OrderMonitor<P>
 where
-    P: Provider<Ethereum> + WalletProvider,
+    P: Provider<Ethereum> + WalletProvider + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -551,10 +551,10 @@ where
             let order_clone = order.clone();
             let db_clone = self.db.clone();
             let market_clone = self.market.clone();
-            let provider_clone = self.provider.clone();
+            let _provider_clone = self.provider.clone();
             let config_clone = self.config.clone();
-            let prover_addr = self.prover_addr;
-            let rpc_retry_config = self.rpc_retry_config.clone();
+            let _prover_addr = self.prover_addr;
+            let _rpc_retry_config = self.rpc_retry_config.clone();
             
             let task = tokio::spawn(async move {
                 // Create a minimal context for locking
