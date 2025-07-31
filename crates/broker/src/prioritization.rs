@@ -61,7 +61,7 @@ fn sort_orders_by_priority_and_mode<T>(
     priority_addresses: Option<&[alloy::primitives::Address]>,
     mode: UnifiedPriorityMode,
 ) where
-    T: AsRef<OrderRequest> + Clone,
+    T: AsRef<OrderRequest>,
 {
     let Some(addresses) = priority_addresses else {
         sort_by_mode(orders, mode);
@@ -81,7 +81,7 @@ fn sort_orders_by_priority_and_mode<T>(
 
 fn sort_by_mode<T>(orders: &mut [T], mode: UnifiedPriorityMode)
 where
-    T: AsRef<OrderRequest> + Clone,
+    T: AsRef<OrderRequest>,
 {
     match mode {
         UnifiedPriorityMode::Random => orders.shuffle(&mut rand::rng()),
@@ -98,18 +98,16 @@ where
             });
         }
         UnifiedPriorityMode::LockAndFulfillFirst => {
-            // Convert to Vec for partitioning
-            let mut orders_vec: Vec<T> = orders.to_vec();
-            let (mut lock_and_fulfill_orders, mut other_orders): (Vec<T>, Vec<T>) = orders_vec
-                .drain(..)
-                .partition(|order| order.as_ref().fulfillment_type == FulfillmentType::LockAndFulfill);
-
-            sort_by_mode(&mut lock_and_fulfill_orders, UnifiedPriorityMode::ShortestExpiry);
-            sort_by_mode(&mut other_orders, UnifiedPriorityMode::ShortestExpiry);
-
-            // Clear and rebuild the original slice
-            orders.iter_mut().zip(lock_and_fulfill_orders.iter().chain(other_orders.iter())).for_each(|(dest, src)| {
-                *dest = src.clone();
+            // Sort by fulfillment type first (LockAndFulfill comes first), then by expiry
+            orders.sort_by_key(|order| {
+                let order_ref = order.as_ref();
+                let is_lock_and_fulfill = matches!(order_ref.fulfillment_type, FulfillmentType::LockAndFulfill);
+                let expiry = match order_ref.fulfillment_type {
+                    FulfillmentType::LockAndFulfill => order_ref.request.lock_expires_at(),
+                    _ => order_ref.request.expires_at(),
+                };
+                // Use a tuple to sort by fulfillment type first, then by expiry
+                (!is_lock_and_fulfill, expiry) // false (LockAndFulfill) comes before true (others)
             });
         }
     }
