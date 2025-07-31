@@ -584,7 +584,7 @@ where
                             "ULTRA-AGGRESSIVE: Using maximum gas allowance for LockAndFulfill order {}",
                             order_clone.id()
                         );
-                        Some(200000000000000) // Double the gas for LockAndFulfill orders
+                        Some(500000000000000) // Increased to 500 gwei for LockAndFulfill orders
                     } else {
                         conf.market.lockin_priority_gas
                     }
