@@ -90,7 +90,7 @@ max_critical_task_retries = 10
 # Optional additional gas to add to the transaction for lockinRequest, good
 # for increasing the priority if competing with multiple provers during the
 # same block
-lockin_priority_gas = 50000000000000
+lockin_priority_gas = 100000000000000
 # Optional balance warning threshold (in native token)
 #
 # If the submitter balance drops below this the broker will issue warning logs
@@ -115,17 +115,17 @@ cache_dir = "./cache"
 #
 # Used for estimating the gas costs associated with an order during pricing. If not set a
 # conservative default will be used.
-lockin_gas_estimate = 300000
+lockin_gas_estimate = 500000
 # Gas estimate for fulfill call
 #
 # Used for estimating the gas costs associated with an order during pricing. If not set a
 # conservative default will be used.
-fulfill_gas_estimate = 750000
+fulfill_gas_estimate = 1000000
 # Gas estimate for proof verification using the RiscZeroGroth16Verifier
 #
 # Used for estimating the gas costs associated with an order during pricing. If not set a
 # conservative default will be used.
-groth16_verify_gas_estimate = 250000
+groth16_verify_gas_estimate = 400000
 
 [prover]
 # Optional config, if using bonsai set the zkVM version here

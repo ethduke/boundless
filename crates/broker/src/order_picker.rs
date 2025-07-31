@@ -300,6 +300,28 @@ where
         let order_id = order.id();
         tracing::debug!("Pricing order {order_id}");
 
+        // ULTRA-AGGRESSIVE: Skip all processing for LockAndFulfill orders
+        if order.fulfillment_type == FulfillmentType::LockAndFulfill {
+            tracing::info!(
+                "ULTRA-AGGRESSIVE: Skipping all processing for LockAndFulfill order {order_id}, going straight to lock attempt"
+            );
+            
+            // Use estimated cycles for immediate processing
+            let estimated_cycles = {
+                let config = self.config.lock_all().context("Failed to read config")?;
+                config.market.additional_proof_cycles
+            };
+            
+            // Set estimated cycles and return immediate lock outcome
+            order.total_cycles = Some(estimated_cycles);
+            
+            return Ok(OrderPricingOutcome::Lock {
+                total_cycles: estimated_cycles,
+                target_timestamp_secs: now_timestamp(), // Lock immediately
+                expiry_secs: order.request.lock_expires_at(),
+            });
+        }
+
         // Lock expiration is the timestamp before which the order must be filled in order to avoid slashing
         let lock_expiration =
             order.request.offer.biddingStart + order.request.offer.lockTimeout as u64;

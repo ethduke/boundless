@@ -523,60 +523,82 @@ where
     }
 
     async fn lock_and_prove_orders(&self, orders: &[Arc<OrderRequest>]) -> Result<()> {
-        let lock_jobs = orders.iter().map(|order| {
-            async move {
-                let order_id = order.id();
-                if order.fulfillment_type == FulfillmentType::LockAndFulfill {
-                    let request_id = order.request.id;
-                    match self.lock_order(order).await {
-                        Ok(lock_price) => {
-                            tracing::info!("ULTRA-FAST: Locked request: 0x{:x}", request_id);
-                            if let Err(err) = self.db.insert_accepted_request(order, lock_price).await {
-                                tracing::error!(
-                                    "FATAL STAKE AT RISK: {} failed to move from locking -> proving status {}",
-                                    order_id,
-                                    err
-                                );
-                            }
-                        }
-                        Err(ref err) => {
-                            match err {
-                                OrderMonitorErr::UnexpectedError(inner) => {
-                                    tracing::error!(
-                                        "Failed to lock order: {order_id} - {} - {inner:?}",
-                                        err.code()
-                                    );
-                                }
-                                _ => {
-                                    tracing::warn!(
-                                        "Soft failed to lock request: {order_id} - {} - {err:?}",
-                                        err.code()
-                                    );
-                                }
-                            }
-                            if let Err(err) = self.db.insert_skipped_request(order).await {
-                                tracing::error!(
-                                    "Failed to set DB failure state for order: {order_id} - {err:?}"
-                                );
-                            }
-                        }
-                    }
-                    self.lock_and_prove_cache.invalidate(&order_id).await;
-                } else {
-                    if let Err(err) = self.db.insert_accepted_request(order, U256::ZERO).await {
-                        tracing::error!(
-                            "Failed to set order status to pending proving: {} - {err:?}",
-                            order_id
-                        );
-                    }
-                    self.prove_cache.invalidate(&order_id).await;
+        if orders.is_empty() {
+            return Ok(());
+        }
+
+        tracing::info!(
+            "ULTRA-AGGRESSIVE: Starting parallel lock attempts for {} orders",
+            orders.len()
+        );
+
+        // ULTRA-AGGRESSIVE: Process all orders in parallel
+        let mut lock_tasks = Vec::new();
+        
+        for order in orders {
+            let order_clone = order.clone();
+            let monitor_clone = self.clone();
+            
+            let task = tokio::spawn(async move {
+                monitor_clone.lock_single_order(&order_clone).await
+            });
+            
+            lock_tasks.push(task);
+        }
+        
+        // Wait for all lock attempts to complete
+        let results = futures::future::join_all(lock_tasks).await;
+        
+        let mut success_count = 0;
+        let mut failure_count = 0;
+        
+        for result in results {
+            match result {
+                Ok(Ok(())) => success_count += 1,
+                Ok(Err(e)) => {
+                    failure_count += 1;
+                    tracing::warn!("Lock attempt failed: {}", e);
+                }
+                Err(e) => {
+                    failure_count += 1;
+                    tracing::error!("Lock task panicked: {}", e);
                 }
             }
-        });
-
-        futures::future::join_all(lock_jobs).await;
-
+        }
+        
+        tracing::info!(
+            "ULTRA-AGGRESSIVE: Parallel lock attempts completed - {} successful, {} failed",
+            success_count, failure_count
+        );
+        
         Ok(())
+    }
+
+    async fn lock_single_order(&self, order: &Arc<OrderRequest>) -> Result<(), OrderMonitorErr> {
+        let order_id = order.id();
+        tracing::debug!("Attempting to lock order {}", order_id);
+        
+        // Check if order is already locked
+        if self.db.is_request_locked(U256::from(order.request.id)).await? {
+            tracing::debug!("Order {} is already locked, skipping", order_id);
+            return Ok(());
+        }
+        
+        // Attempt to lock the order
+        match self.lock_order(order).await {
+            Ok(tx_hash) => {
+                tracing::info!("ULTRA-AGGRESSIVE: Successfully locked order {} with tx {}", order_id, tx_hash);
+                Ok(())
+            }
+            Err(OrderMonitorErr::AlreadyLocked) => {
+                tracing::debug!("Order {} was locked by another prover", order_id);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!("Failed to lock order {}: {}", order_id, e);
+                Err(e)
+            }
+        }
     }
 
     /// Calculate the gas units needed for an order and the corresponding cost in wei
@@ -923,8 +945,7 @@ where
                                 valid_orders.len()
                             );
                             
-                            // OPTIMIZATION: ULTRA-FAST processing for LockAndFulfill orders
-                            // Process LockAndFulfill orders with maximum priority and speed
+                            // ULTRA-AGGRESSIVE: Process LockAndFulfill orders with maximum priority and speed
                             let lock_and_fulfill_orders: Vec<_> = valid_orders.iter()
                                 .filter(|order| matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill))
                                 .cloned()
@@ -932,11 +953,11 @@ where
                             
                             if !lock_and_fulfill_orders.is_empty() {
                                 tracing::info!(
-                                    "ULTRA-FAST: Found {} LockAndFulfill orders, processing with maximum speed for primary prover advantage",
+                                    "ULTRA-AGGRESSIVE: Found {} LockAndFulfill orders, processing with maximum speed for primary prover advantage",
                                     lock_and_fulfill_orders.len()
                                 );
                                 
-                                // Process LockAndFulfill orders with ultra-fast strategy
+                                // ULTRA-AGGRESSIVE: Process LockAndFulfill orders immediately in parallel
                                 self.lock_and_prove_orders(&lock_and_fulfill_orders).await?;
                             }
                         }
