@@ -84,6 +84,12 @@ impl CodedError for OrderMonitorErr {
     }
 }
 
+impl From<anyhow::Error> for OrderMonitorErr {
+    fn from(err: anyhow::Error) -> Self {
+        OrderMonitorErr::UnexpectedError(err)
+    }
+}
+
 /// Represents the capacity for proving orders that we have available given our config.
 /// Also manages vending out capacity for proving, preventing too many proofs from being
 /// kicked off in each iteration.

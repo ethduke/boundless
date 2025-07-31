@@ -1250,6 +1250,7 @@ where
                             let picker_clone = picker.clone();
                             let task_cancel_token = cancel_token.child_token();
                             let order_id_clone = order_id.clone();
+                            let order_id_for_log = order_id.clone();
                             let request_id = U256::from(order.request.id);
                             
                             let _task = tasks.spawn(async move {
@@ -1260,7 +1261,7 @@ where
                             });
                             
                             tracing::info!(
-                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id_clone}"
+                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id_for_log}"
                             );
                         } else {
                             pending_orders.push(order);
