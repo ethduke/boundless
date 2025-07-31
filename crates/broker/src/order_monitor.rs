@@ -17,7 +17,7 @@ use crate::OrderRequest;
 use crate::{
     chain_monitor::ChainMonitorService,
     config::{ConfigLock, OrderCommitmentPriority},
-    db::DbObj,
+    db::{DbError, DbObj},
     errors::CodedError,
     impl_coded_debug, now_timestamp,
     task::{RetryRes, RetryTask, SupervisorErr},
@@ -87,6 +87,12 @@ impl CodedError for OrderMonitorErr {
 impl From<anyhow::Error> for OrderMonitorErr {
     fn from(err: anyhow::Error) -> Self {
         OrderMonitorErr::UnexpectedError(err)
+    }
+}
+
+impl From<DbError> for OrderMonitorErr {
+    fn from(err: DbError) -> Self {
+        OrderMonitorErr::UnexpectedError(anyhow::anyhow!(err))
     }
 }
 
