@@ -1270,11 +1270,13 @@ where
                             .or_default()
                             .insert(order_id.clone(), task_cancel_token.clone());
 
+                        let order_id_clone = order_id.clone();
+                        let request_id_clone = request_id.clone();
                         tasks.spawn(async move {
                             picker_clone
                                 .price_order_and_update_state(order, task_cancel_token)
                                 .await;
-                            (order_id, request_id)
+                            (order_id_clone, request_id_clone)
                         });
                     }
                 }
