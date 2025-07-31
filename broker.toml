@@ -4,7 +4,7 @@
 # This price is multiplied the number of mega-cycles (i.e. million RISC-V cycles) that the requested
 # execution took, as calculated by running the request in preflight. This is one of the inputs to
 # decide the minimum price to accept for a request.
-mcycle_price = "0.0000000000001"
+mcycle_price = "0.0000000000000001"
 # Mega-cycle price, denominated in the Boundless staking token.
 #
 # Similar to the mcycle_price option above. This is used to determine the minimum price to accept an
@@ -90,7 +90,7 @@ max_critical_task_retries = 10
 # Optional additional gas to add to the transaction for lockinRequest, good
 # for increasing the priority if competing with multiple provers during the
 # same block
-lockin_priority_gas = 500000000000000
+lockin_priority_gas = 4000000000000
 # Optional balance warning threshold (in native token)
 #
 # If the submitter balance drops below this the broker will issue warning logs
