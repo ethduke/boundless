@@ -27,7 +27,7 @@ use alloy::{
     network::Ethereum,
     primitives::{
         utils::{format_ether, parse_units},
-        Address, U256,
+        Address, U256, B256,
     },
     providers::{Provider, WalletProvider},
 };
@@ -235,7 +235,108 @@ where
 
     async fn lock_order(&self, order: &OrderRequest) -> Result<U256, OrderMonitorErr> {
         let request_id = order.request.id;
-
+        
+        // Validate the ProofRequest before attempting to lock
+        if let Err(validation_err) = order.request.validate() {
+            tracing::warn!(
+                "Skipping malformed order {}: validation failed: {}",
+                order.id(),
+                validation_err
+            );
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "Invalid ProofRequest data: {}",
+                validation_err
+            )));
+        }
+        
+        // Check if imageUrl is empty
+        if order.request.imageUrl.is_empty() {
+            tracing::warn!("Skipping order {}: empty imageUrl", order.id());
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has empty imageUrl"
+            )));
+        }
+        
+        // Check if imageId is zero
+        if order.request.requirements.imageId == B256::default() {
+            tracing::warn!("Skipping order {}: zero imageId", order.id());
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has zero imageId"
+            )));
+        }
+        
+        // Check if offer parameters are valid
+        if order.request.offer.timeout == 0 {
+            tracing::warn!("Skipping order {}: zero timeout", order.id());
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has zero timeout"
+            )));
+        }
+        
+        if order.request.offer.lockTimeout == 0 {
+            tracing::warn!("Skipping order {}: zero lockTimeout", order.id());
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has zero lockTimeout"
+            )));
+        }
+        
+        if order.request.offer.maxPrice == U256::ZERO {
+            tracing::warn!("Skipping order {}: zero maxPrice", order.id());
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has zero maxPrice"
+            )));
+        }
+        
+        if order.request.offer.biddingStart == 0 {
+            tracing::warn!("Skipping order {}: zero biddingStart", order.id());
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has zero biddingStart"
+            )));
+        }
+        
+        // Additional validation checks
+        if order.request.offer.maxPrice < order.request.offer.minPrice {
+            tracing::warn!(
+                "Skipping order {}: maxPrice ({}) < minPrice ({})",
+                order.id(),
+                order.request.offer.maxPrice,
+                order.request.offer.minPrice
+            );
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has invalid price range: maxPrice < minPrice"
+            )));
+        }
+        
+        if order.request.offer.rampUpPeriod > order.request.offer.lockTimeout {
+            tracing::warn!(
+                "Skipping order {}: rampUpPeriod ({}) > lockTimeout ({})",
+                order.id(),
+                order.request.offer.rampUpPeriod,
+                order.request.offer.lockTimeout
+            );
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has invalid timing: rampUpPeriod > lockTimeout"
+            )));
+        }
+        
+        if order.request.offer.lockTimeout > order.request.offer.timeout {
+            tracing::warn!(
+                "Skipping order {}: lockTimeout ({}) > timeout ({})",
+                order.id(),
+                order.request.offer.lockTimeout,
+                order.request.offer.timeout
+            );
+            return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!(
+                "ProofRequest has invalid timing: lockTimeout > timeout"
+            )));
+        }
+        
+        tracing::info!(
+            "Locking request: 0x{:x} for stake: {}",
+            request_id,
+            order.request.offer.lockStake
+        );
+        
         let order_status = self
             .market
             .get_status(request_id, Some(order.request.expires_at()))
@@ -247,7 +348,7 @@ where
             // was locked in at
             return Err(OrderMonitorErr::AlreadyLocked);
         }
-
+        
         let is_locked = self
             .db
             .is_request_locked(U256::from(order.request.id))
@@ -257,17 +358,12 @@ where
             tracing::warn!("Request 0x{:x} already locked: {order_status:?}, skipping", request_id);
             return Err(OrderMonitorErr::AlreadyLocked);
         }
-
+        
         let conf_priority_gas = {
             let conf = self.config.lock_all().context("Failed to lock config")?;
             conf.market.lockin_priority_gas
         };
-
-        tracing::info!(
-            "Locking request: 0x{:x} for stake: {}",
-            request_id,
-            order.request.offer.lockStake
-        );
+        
         let lock_block = self
             .market
             .lock_request(&order.request, order.client_sig.clone(), conf_priority_gas)
