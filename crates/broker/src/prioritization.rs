@@ -56,63 +56,6 @@ impl From<OrderCommitmentPriority> for UnifiedPriorityMode {
     }
 }
 
-fn sort_orders_by_priority_and_mode<T>(
-    orders: &mut Vec<T>,
-    priority_addresses: Option<&[alloy::primitives::Address]>,
-    mode: UnifiedPriorityMode,
-) where
-    T: AsRef<OrderRequest>,
-{
-    let Some(addresses) = priority_addresses else {
-        sort_by_mode(orders, mode);
-        return;
-    };
-
-    let (mut priority_orders, mut regular_orders): (Vec<T>, Vec<T>) = orders
-        .drain(..)
-        .partition(|order| addresses.contains(&order.as_ref().request.client_address()));
-
-    sort_by_mode(&mut priority_orders, mode);
-    sort_by_mode(&mut regular_orders, mode);
-
-    orders.extend(priority_orders);
-    orders.extend(regular_orders);
-}
-
-fn sort_by_mode<T>(orders: &mut [T], mode: UnifiedPriorityMode)
-where
-    T: AsRef<OrderRequest>,
-{
-    match mode {
-        UnifiedPriorityMode::Random => orders.shuffle(&mut rand::rng()),
-        UnifiedPriorityMode::TimeOrdered => {
-            // Already in observation time order, no sorting needed
-        }
-        UnifiedPriorityMode::ShortestExpiry => {
-            orders.sort_by_key(|order| {
-                let order_ref = order.as_ref();
-                match order_ref.fulfillment_type {
-                    FulfillmentType::LockAndFulfill => order_ref.request.lock_expires_at(),
-                    _ => order_ref.request.expires_at(),
-                }
-            });
-        }
-        UnifiedPriorityMode::LockAndFulfillFirst => {
-            // Sort by fulfillment type first (LockAndFulfill comes first), then by expiry
-            orders.sort_by_key(|order| {
-                let order_ref = order.as_ref();
-                let is_lock_and_fulfill = matches!(order_ref.fulfillment_type, FulfillmentType::LockAndFulfill);
-                let expiry = match order_ref.fulfillment_type {
-                    FulfillmentType::LockAndFulfill => order_ref.request.lock_expires_at(),
-                    _ => order_ref.request.expires_at(),
-                };
-                // Use a tuple to sort by fulfillment type first, then by expiry
-                (!is_lock_and_fulfill, expiry) // false (LockAndFulfill) comes before true (others)
-            });
-        }
-    }
-}
-
 impl<P> OrderPicker<P> {
     #[allow(clippy::vec_box)]
     pub(crate) fn select_pricing_orders(
@@ -126,7 +69,22 @@ impl<P> OrderPicker<P> {
             return Vec::new();
         }
 
-        sort_orders_by_priority_and_mode(orders, priority_addresses, priority_mode.into());
+        // Sort orders with priority addresses first, then by mode
+        let Some(addresses) = priority_addresses else {
+            sort_orders_by_priority_and_mode_box(orders, priority_mode.into());
+            let take_count = std::cmp::min(capacity, orders.len());
+            return orders.drain(..take_count).collect();
+        };
+
+        let (mut priority_orders, mut regular_orders): (Vec<Box<OrderRequest>>, Vec<Box<OrderRequest>>) = orders
+            .drain(..)
+            .partition(|order| addresses.contains(&order.request.client_address()));
+
+        sort_orders_by_priority_and_mode_box(&mut priority_orders, priority_mode.into());
+        sort_orders_by_priority_and_mode_box(&mut regular_orders, priority_mode.into());
+
+        orders.extend(priority_orders);
+        orders.extend(regular_orders);
 
         let take_count = std::cmp::min(capacity, orders.len());
         orders.drain(..take_count).collect()
@@ -143,7 +101,24 @@ impl<P> OrderMonitor<P> {
         priority_addresses: Option<&[alloy::primitives::Address]>,
     ) -> Vec<Arc<OrderRequest>> {
         // Sort orders with priority addresses first, then by mode
-        sort_orders_by_priority_and_mode(&mut orders, priority_addresses, priority_mode.into());
+        let Some(addresses) = priority_addresses else {
+            sort_orders_by_priority_and_mode_arc(&mut orders, priority_mode.into());
+            tracing::debug!(
+                "Orders ready for proving, prioritized. Before applying capacity limits: {}",
+                orders.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+            );
+            return orders;
+        };
+
+        let (mut priority_orders, mut regular_orders): (Vec<Arc<OrderRequest>>, Vec<Arc<OrderRequest>>) = orders
+            .drain(..)
+            .partition(|order| addresses.contains(&order.request.client_address()));
+
+        sort_orders_by_priority_and_mode_arc(&mut priority_orders, priority_mode.into());
+        sort_orders_by_priority_and_mode_arc(&mut regular_orders, priority_mode.into());
+
+        orders.extend(priority_orders);
+        orders.extend(regular_orders);
 
         tracing::debug!(
             "Orders ready for proving, prioritized. Before applying capacity limits: {}",
@@ -151,6 +126,70 @@ impl<P> OrderMonitor<P> {
         );
 
         orders
+    }
+}
+
+// Separate implementations for Box<OrderRequest>
+fn sort_orders_by_priority_and_mode_box(
+    orders: &mut Vec<Box<OrderRequest>>,
+    mode: UnifiedPriorityMode,
+) {
+    match mode {
+        UnifiedPriorityMode::Random => orders.shuffle(&mut rand::rng()),
+        UnifiedPriorityMode::TimeOrdered => {
+            // Already in observation time order, no sorting needed
+        }
+        UnifiedPriorityMode::ShortestExpiry => {
+            orders.sort_by_key(|order| {
+                match order.fulfillment_type {
+                    FulfillmentType::LockAndFulfill => order.request.lock_expires_at(),
+                    _ => order.request.expires_at(),
+                }
+            });
+        }
+        UnifiedPriorityMode::LockAndFulfillFirst => {
+            // Sort by fulfillment type first (LockAndFulfill comes first), then by expiry
+            orders.sort_by_key(|order| {
+                let is_lock_and_fulfill = matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill);
+                let expiry = match order.fulfillment_type {
+                    FulfillmentType::LockAndFulfill => order.request.lock_expires_at(),
+                    _ => order.request.expires_at(),
+                };
+                (!is_lock_and_fulfill, expiry) // false (LockAndFulfill) comes before true (others)
+            });
+        }
+    }
+}
+
+// Separate implementations for Arc<OrderRequest>
+fn sort_orders_by_priority_and_mode_arc(
+    orders: &mut Vec<Arc<OrderRequest>>,
+    mode: UnifiedPriorityMode,
+) {
+    match mode {
+        UnifiedPriorityMode::Random => orders.shuffle(&mut rand::rng()),
+        UnifiedPriorityMode::TimeOrdered => {
+            // Already in observation time order, no sorting needed
+        }
+        UnifiedPriorityMode::ShortestExpiry => {
+            orders.sort_by_key(|order| {
+                match order.fulfillment_type {
+                    FulfillmentType::LockAndFulfill => order.request.lock_expires_at(),
+                    _ => order.request.expires_at(),
+                }
+            });
+        }
+        UnifiedPriorityMode::LockAndFulfillFirst => {
+            // Sort by fulfillment type first (LockAndFulfill comes first), then by expiry
+            orders.sort_by_key(|order| {
+                let is_lock_and_fulfill = matches!(order.fulfillment_type, FulfillmentType::LockAndFulfill);
+                let expiry = match order.fulfillment_type {
+                    FulfillmentType::LockAndFulfill => order.request.lock_expires_at(),
+                    _ => order.request.expires_at(),
+                };
+                (!is_lock_and_fulfill, expiry) // false (LockAndFulfill) comes before true (others)
+            });
+        }
     }
 }
 
