@@ -1388,7 +1388,7 @@ where
                             .or_default()
                             .insert(order_id.clone(), task_cancel_token.clone());
 
-                        let task = tasks.spawn(async move {
+                                                    let _task = tasks.spawn(async move {
                             picker_clone
                                 .price_order_and_update_state(order, task_cancel_token)
                                 .await;
