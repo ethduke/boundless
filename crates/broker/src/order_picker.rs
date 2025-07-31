@@ -300,31 +300,12 @@ where
         let order_id = order.id();
         tracing::debug!("Pricing order {order_id}");
 
-        // ULTRA-AGGRESSIVE: Skip all processing for LockAndFulfill orders
+        // Skip all processing for LockAndFulfill orders
         if order.fulfillment_type == FulfillmentType::LockAndFulfill {
-            tracing::info!(
-                "ULTRA-AGGRESSIVE: Skipping all processing for LockAndFulfill order {order_id}, going straight to lock attempt"
+            tracing::debug!(
+                "Skipping all processing for LockAndFulfill order {order_id}, going straight to lock attempt"
             );
-            
-            // Use estimated cycles for immediate processing
-            let estimated_cycles = {
-                let config = self.config.lock_all().context("Failed to read config")?;
-                config.market.additional_proof_cycles
-            };
-            
-            // Set estimated cycles and return immediate lock outcome
-            order.total_cycles = Some(estimated_cycles);
-            
-            // ULTRA-AGGRESSIVE: Skip all gas checks for LockAndFulfill orders
-            tracing::info!(
-                "ULTRA-AGGRESSIVE: Bypassing gas checks for LockAndFulfill order {order_id}"
-            );
-            
-            return Ok(OrderPricingOutcome::Lock {
-                total_cycles: estimated_cycles,
-                target_timestamp_secs: now_timestamp(), // Lock immediately
-                expiry_secs: order.request.lock_expires_at(),
-            });
+            return Ok(Skip);
         }
 
         // Lock expiration is the timestamp before which the order must be filled in order to avoid slashing
@@ -1240,29 +1221,16 @@ where
                     Some(order) = rx.recv() => {
                         let order_id = order.id();
                         
-                        // ULTRA-AGGRESSIVE: Process LockAndFulfill orders immediately
+                        // Process LockAndFulfill orders immediately
                         if order.fulfillment_type == FulfillmentType::LockAndFulfill {
-                            tracing::info!(
-                                "ULTRA-AGGRESSIVE: Processing LockAndFulfill order {order_id} immediately without queuing"
+                            tracing::debug!(
+                                "Processing LockAndFulfill order {order_id} immediately without queuing"
                             );
-                            
-                            // Process LockAndFulfill orders immediately
-                            let picker_clone = picker.clone();
-                            let task_cancel_token = cancel_token.child_token();
-                            let order_id_clone = order_id.clone();
-                            let order_id_for_log = order_id.clone();
-                            let request_id = U256::from(order.request.id);
-                            
-                            let _task = tasks.spawn(async move {
-                                picker_clone
-                                    .price_order_and_update_state(order, task_cancel_token)
-                                    .await;
-                                (order_id_clone, request_id)
+                            return Ok(OrderPricingOutcome::Lock {
+                                total_cycles: estimated_cycles,
+                                target_timestamp_secs: now_timestamp(), // Lock immediately
+                                expiry_secs: order.request.lock_expires_at(),
                             });
-                            
-                            tracing::info!(
-                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id_for_log}"
-                            );
                         } else {
                             pending_orders.push(order);
                             tracing::debug!(

@@ -333,7 +333,7 @@ where
         
         tracing::info!(
             "Locking request: 0x{:x} for stake: {}",
-            request_id,
+            order.request.id,
             order.request.offer.lockStake
         );
         
@@ -636,12 +636,12 @@ where
         }
 
         tracing::info!(
-            "ULTRA-AGGRESSIVE: Starting parallel lock attempts for {} orders",
+            "Starting parallel lock attempts for {} orders",
             orders.len()
         );
-
-        // ULTRA-AGGRESSIVE: Process all orders in parallel
-        let mut lock_tasks = Vec::new();
+        
+        // Process all orders in parallel
+        let mut tasks = tokio::task::JoinSet::new();
         
         for order in orders {
             let order_clone = order.clone();
@@ -674,16 +674,7 @@ where
                 // Attempt to lock the order
                 let conf_priority_gas = {
                     let conf = config_clone.lock_all().context("Failed to lock config")?;
-                    // ULTRA-AGGRESSIVE: Use maximum gas for LockAndFulfill orders
-                    if order_clone.fulfillment_type == FulfillmentType::LockAndFulfill {
-                        tracing::info!(
-                            "ULTRA-AGGRESSIVE: Using maximum gas allowance for LockAndFulfill order {}",
-                            order_clone.id()
-                        );
-                        Some(500000000000000) // Increased to 500 gwei for LockAndFulfill orders
-                    } else {
-                        conf.market.lockin_priority_gas
-                    }
+                    conf.market.lockin_priority_gas
                 };
                 
                 tracing::info!(
@@ -694,7 +685,7 @@ where
                 
                 match market_clone.lock_request(&order_clone.request, order_clone.client_sig.clone(), conf_priority_gas).await {
                     Ok(lock_block) => {
-                        tracing::info!("ULTRA-AGGRESSIVE: Successfully locked order {} with block {}", order_id, lock_block);
+                        tracing::info!("Successfully locked order {} with block {}", order_id, lock_block);
                         Ok(())
                     }
                     Err(e) => {
@@ -722,11 +713,11 @@ where
                 }
             });
             
-            lock_tasks.push(task);
+            tasks.spawn(task);
         }
         
         // Wait for all lock attempts to complete
-        let results = futures::future::join_all(lock_tasks).await;
+        let results = futures::future::join_all(tasks).await;
         
         let mut success_count = 0;
         let mut failure_count = 0;
@@ -746,7 +737,7 @@ where
         }
         
         tracing::info!(
-            "ULTRA-AGGRESSIVE: Parallel lock attempts completed - {} successful, {} failed",
+            "Parallel lock attempts completed - {} successful, {} failed",
             success_count, failure_count
         );
         
@@ -1109,7 +1100,7 @@ where
                                     lock_and_fulfill_orders.len()
                                 );
                                 
-                                // ULTRA-AGGRESSIVE: Process LockAndFulfill orders immediately in parallel
+                                // Process LockAndFulfill orders immediately in parallel
                                 self.lock_and_prove_orders(&lock_and_fulfill_orders).await?;
                             }
                         }
