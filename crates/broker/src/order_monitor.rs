@@ -537,10 +537,81 @@ where
         
         for order in orders {
             let order_clone = order.clone();
-            let monitor_arc = Arc::new(self.clone());
+            let db_clone = self.db.clone();
+            let market_clone = self.market.clone();
+            let provider_clone = self.provider.clone();
+            let config_clone = self.config.clone();
+            let prover_addr = self.prover_addr;
+            let rpc_retry_config = self.rpc_retry_config.clone();
             
             let task = tokio::spawn(async move {
-                monitor_arc.lock_single_order(&order_clone).await
+                // Create a minimal context for locking
+                let order_id = order_clone.id();
+                tracing::debug!("Attempting to lock order {}", order_id);
+                
+                // Check if order is already locked
+                let is_locked = match db_clone.is_request_locked(U256::from(order_clone.request.id)).await {
+                    Ok(locked) => locked,
+                    Err(e) => {
+                        tracing::error!("Database error checking lock status: {}", e);
+                        return Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!("Database error: {}", e)));
+                    }
+                };
+                
+                if is_locked {
+                    tracing::debug!("Order {} is already locked, skipping", order_id);
+                    return Ok(());
+                }
+                
+                // Attempt to lock the order
+                let conf_priority_gas = {
+                    let conf = config_clone.lock_all().context("Failed to lock config")?;
+                    // ULTRA-AGGRESSIVE: Use maximum gas for LockAndFulfill orders
+                    if order_clone.fulfillment_type == FulfillmentType::LockAndFulfill {
+                        tracing::info!(
+                            "ULTRA-AGGRESSIVE: Using maximum gas allowance for LockAndFulfill order {}",
+                            order_clone.id()
+                        );
+                        Some(200000000000000) // Double the gas for LockAndFulfill orders
+                    } else {
+                        conf.market.lockin_priority_gas
+                    }
+                };
+                
+                tracing::info!(
+                    "Locking request: 0x{:x} for stake: {}",
+                    order_clone.request.id,
+                    order_clone.request.offer.lockStake
+                );
+                
+                match market_clone.lock_request(&order_clone.request, order_clone.client_sig.clone(), conf_priority_gas).await {
+                    Ok(lock_block) => {
+                        tracing::info!("ULTRA-AGGRESSIVE: Successfully locked order {} with block {}", order_id, lock_block);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        match e {
+                            MarketError::TxnError(txn_err) => match txn_err {
+                                TxnErr::BoundlessMarketErr(IBoundlessMarketErrors::RequestIsLocked(_)) => {
+                                    tracing::debug!("Order {} was locked by another prover", order_id);
+                                    Ok(())
+                                }
+                                _ => {
+                                    tracing::warn!("Failed to lock order {}: {}", order_id, txn_err);
+                                    Err(OrderMonitorErr::LockTxFailed(txn_err.to_string()))
+                                }
+                            }
+                            MarketError::RequestAlreadyLocked(_) => {
+                                tracing::debug!("Order {} was locked by another prover", order_id);
+                                Ok(())
+                            }
+                            _ => {
+                                tracing::warn!("Failed to lock order {}: {}", order_id, e);
+                                Err(OrderMonitorErr::UnexpectedError(anyhow::anyhow!("Lock failed: {}", e)))
+                            }
+                        }
+                    }
+                }
             });
             
             lock_tasks.push(task);
@@ -572,34 +643,6 @@ where
         );
         
         Ok(())
-    }
-
-    async fn lock_single_order(&self, order: &Arc<OrderRequest>) -> Result<(), OrderMonitorErr> {
-        let order_id = order.id();
-        tracing::debug!("Attempting to lock order {}", order_id);
-        
-        // Check if order is already locked
-        if self.db.is_request_locked(U256::from(order.request.id)).await
-            .map_err(|e| OrderMonitorErr::UnexpectedError(anyhow::anyhow!("Database error: {}", e)))? {
-            tracing::debug!("Order {} is already locked, skipping", order_id);
-            return Ok(());
-        }
-        
-        // Attempt to lock the order
-        match self.lock_order(order).await {
-            Ok(tx_hash) => {
-                tracing::info!("ULTRA-AGGRESSIVE: Successfully locked order {} with tx {}", order_id, tx_hash);
-                Ok(())
-            }
-            Err(OrderMonitorErr::AlreadyLocked) => {
-                tracing::debug!("Order {} was locked by another prover", order_id);
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!("Failed to lock order {}: {}", order_id, e);
-                Err(e)
-            }
-        }
     }
 
     /// Calculate the gas units needed for an order and the corresponding cost in wei
