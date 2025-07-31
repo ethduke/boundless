@@ -1260,7 +1260,7 @@ where
                             });
                             
                             tracing::info!(
-                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id}"
+                                "ULTRA-AGGRESSIVE: Spawned immediate task for LockAndFulfill order {order_id_clone}"
                             );
                         } else {
                             pending_orders.push(order);
