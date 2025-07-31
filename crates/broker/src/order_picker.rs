@@ -1249,12 +1249,14 @@ where
                             // Process LockAndFulfill orders immediately
                             let picker_clone = picker.clone();
                             let task_cancel_token = cancel_token.child_token();
+                            let order_id_clone = order_id.clone();
+                            let request_id = U256::from(order.request.id);
                             
-                            let task = tasks.spawn(async move {
+                            let _task = tasks.spawn(async move {
                                 picker_clone
                                     .price_order_and_update_state(order, task_cancel_token)
                                     .await;
-                                (order_id.clone(), U256::from(order.request.id))
+                                (order_id_clone, request_id)
                             });
                             
                             tracing::info!(

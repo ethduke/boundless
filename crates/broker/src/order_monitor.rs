@@ -537,10 +537,10 @@ where
         
         for order in orders {
             let order_clone = order.clone();
-            let monitor_clone = self.clone();
+            let monitor_arc = Arc::new(self.clone());
             
             let task = tokio::spawn(async move {
-                monitor_clone.lock_single_order(&order_clone).await
+                monitor_arc.lock_single_order(&order_clone).await
             });
             
             lock_tasks.push(task);
@@ -579,7 +579,8 @@ where
         tracing::debug!("Attempting to lock order {}", order_id);
         
         // Check if order is already locked
-        if self.db.is_request_locked(U256::from(order.request.id)).await? {
+        if self.db.is_request_locked(U256::from(order.request.id)).await
+            .map_err(|e| OrderMonitorErr::UnexpectedError(anyhow::anyhow!("Database error: {}", e)))? {
             tracing::debug!("Order {} is already locked, skipping", order_id);
             return Ok(());
         }
