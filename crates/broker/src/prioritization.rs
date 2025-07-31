@@ -61,7 +61,7 @@ fn sort_orders_by_priority_and_mode<T>(
     priority_addresses: Option<&[alloy::primitives::Address]>,
     mode: UnifiedPriorityMode,
 ) where
-    T: AsRef<OrderRequest>,
+    T: AsRef<OrderRequest> + Clone,
 {
     let Some(addresses) = priority_addresses else {
         sort_by_mode(orders, mode);
