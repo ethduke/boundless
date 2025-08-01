@@ -727,10 +727,18 @@ where
         
         for result in results {
             match result {
-                Ok(()) => success_count += 1,
-                Err(e) => {
+                Ok(Ok(Ok(()))) => success_count += 1,
+                Ok(Ok(Err(e))) => {
                     failure_count += 1;
                     tracing::warn!("Lock attempt failed: {}", e);
+                }
+                Ok(Err(e)) => {
+                    failure_count += 1;
+                    tracing::error!("Lock task join error: {}", e);
+                }
+                Err(e) => {
+                    failure_count += 1;
+                    tracing::error!("Lock task panicked: {}", e);
                 }
             }
         }
